@@ -1,18 +1,10 @@
 package commands
 
 import (
-	"context"
 	"fmt"
 	"strings"
 
 	"kurtestosis/cli/core"
-	"kurtestosis/cli/kurtosis"
-	"kurtestosis/cli/kurtosis/backend"
-
-	"github.com/kurtosis-tech/kurtosis/container-engine-lib/lib/backend_interface/objects/image_download_mode"
-	"github.com/kurtosis-tech/kurtosis/core/server/api_container/server/startosis_engine/enclave_structure"
-	"github.com/kurtosis-tech/kurtosis/core/server/api_container/server/startosis_engine/instructions_plan/resolver"
-	"github.com/kurtosis-tech/kurtosis/core/server/api_container/server/startosis_engine/startosis_constants"
 
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
@@ -90,185 +82,64 @@ func init() {
 }
 
 func run(cmd *cobra.Command, args []string) error {
-	logrus.Warn("kurtestosis CLI is still work in progress")
+	logger := logrus.StandardLogger()
+
+	logger.Warn("kurtestosis CLI is still work in progress")
 
 	// First we load the project
 	projectPath := args[0]
 	project, projectErr := core.LoadKurtestosisProject(args[0])
 	if projectErr != nil {
-		logrus.Errorf("Failed to load project from %s: %v", projectPath, projectErr)
+		logger.Errorf("Failed to load project from %s: %v", projectPath, projectErr)
 
 		return fmt.Errorf("failed to load project from %s: %w", projectPath, projectErr)
 	}
 
+	testSuiteConfig := &core.TestSuiteConfig{
+		TestFilePattern: testFilePatternStr
+		TestPattern: testPatternStr,
+	}
+
+	reporter, err := core.RunTestSuite(project, testSuiteConfig, logger)
+
 	// Let's now get the list of matching test files
 	testFiles, testFilesErr := core.ListMatchingTestFiles(project, testFilePatternStr)
 	if testFilesErr != nil {
-		logrus.Errorf("Error matching test files in project: %v", testFilesErr)
+		logger.Errorf("Error matching test files in project: %v", testFilesErr)
 
 		return fmt.Errorf("error matching test files in project: %w", testFilesErr)
 	}
 
 	// Exit if there are no test suites to run
 	if len(testFiles) == 0 {
-		logrus.Warn("No test suites found matching the glob pattern")
+		logger.Warn("No test suites found matching the glob pattern")
 
 		return nil
 	}
 
-	// The summary of the whole test run
-	testSuiteSummary := core.NewTestSuiteSummary(project)
+	// Create a reporter for the test run
+	testSuiteReporter := core.CreateStarlarkTestSuiteReporter(project, logger)
+
+	// Call the
+	testSuiteReporter.Before()
 
 	// Run the test suites
 	for _, testFile := range testFiles {
-		testFileSummary, err := runTestFile(testFile)
+		testFileReporter := testSuiteReporter.Nest(core.CreateStarlarkTestFileReporter(testFile, logger))
+
+		err := runTestFile(testFile, testFileReporter)
 		if err != nil {
-			logrus.Errorf("Error running test suite %s: %v", testFile, err)
+			logrus.Errorf("error running test suite %s: %v", testFile, err)
 
-			return fmt.Errorf("error running test suite %s: %v", testFile, err)
+			return fmt.Errorf("error running test suite %s: %w", testFile, err)
 		}
-
-		testSuiteSummary.Append(testFileSummary)
 	}
 
-	if testSuiteSummary.Success() {
+	if testSuiteReporter.Success() {
 		return nil
 	}
 
-	logrus.Errorf("Test suite failed")
-
 	return fmt.Errorf("test suite failed")
-}
-
-func runTestFile(testFile *core.TestFile) (*core.TestFileSummary, error) {
-	// The summary object will hold the test results for this test file
-	testFileSummary := core.NewTestFileSummary(testFile)
-
-	// First we parse the test file and extract the names of matching test functions
-	testFunctions, testFunctionsErr := core.ListMatchingTests(testFile, testPatternStr)
-	if testFunctionsErr != nil {
-		logrus.Errorf("Failed to list matching test functions in %s: %v", testFile, testFunctionsErr)
-
-		return nil, fmt.Errorf("failed to list matching test functions in %s: %w", testFile, testFunctionsErr)
-	}
-
-	// Exit if there are no test suites to run
-	if len(testFunctions) == 0 {
-		logrus.Warnf("No tests found matching the test pattern %s in %s", testPatternStr, testFile)
-
-		return testFileSummary, nil
-	}
-
-	logrus.Infof("SUITE %s", testFile)
-
-	// Iterate over the test suites and run them one by one, collecting the test run summaries
-	for _, testFunction := range testFunctions {
-		testFunctionSummary, testFunctionErr := runTestFunction(testFunction)
-		if testFunctionErr != nil {
-			logrus.Errorf("Failed to run test function %s: %v", testFunction, testFunctionErr)
-
-			return nil, fmt.Errorf("failed to run test function %s: %w", testFunction, testFunctionErr)
-		}
-
-		testFileSummary.Append(testFunctionSummary)
-	}
-
-	return testFileSummary, nil
-}
-
-func runTestFunction(testFunction *core.TestFunction) (*core.TestFunctionSummary, error) {
-	var err error
-
-	// The summary object will hold the test results for this test function
-	logrus.Debugf("\tRUN %ss", testFunction)
-
-	// Let's make a database first
-	enclaveDB, teardownEnclaveDB, err := backend.CreateEnclaveDB()
-	if err != nil {
-		return nil, fmt.Errorf("failed to create EnclaveDB: %w", err)
-	}
-
-	// We want to tear the database down once it's all over
-	defer teardownEnclaveDB()
-
-	// Package content providers
-	localGitPackageContentProvider, err := backend.CreateLocalGitPackageContentProvider(tempDirRootStr, enclaveDB)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create local git package content provider: %w", err)
-	}
-	localProxyPackageContentProvider := backend.CreateLocalProxyPackageContentProvider(testFunction.TestFile.Project, localGitPackageContentProvider)
-
-	// Now we create the value storage that holds all the starlark values
-	starlarkValueSerde := backend.CreateStarlarkValueSerde()
-	runtimeValueStore, interpretationTimeValueStore, err := backend.CreateValueStores(enclaveDB, starlarkValueSerde)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create kurtosis value stores: %w", err)
-	}
-
-	// We load all the kurtestosis-specific predeclared starlark builtins
-	predeclared, err := kurtosis.LoadKurtestosisPredeclared()
-	if err != nil {
-		return nil, err
-	}
-
-	// And we create a processor function that merges them with kurtosis predeclared builtins
-	processBuiltins := kurtosis.CreateProcessBuiltins(predeclared)
-
-	// We setup a test reporter
-	//
-	// Besides collecting and formatting the test output (mostly TBD),
-	// a reporter is required for correct functioning of the starlarktest assert module
-	reporter := core.NewTestReporter(testFunction)
-	kurtosis.SetupKurtestosisPredeclared(reporter)
-
-	// Service network (99% mock)
-	serviceNetwork := backend.CreateKurtestosisServiceNetwork()
-
-	// And finally an interpreter
-	interpreter, err := backend.CreateInterpreter(
-		localProxyPackageContentProvider, // packageContentProvider
-		starlarkValueSerde,               // starlarkValueSerde
-		runtimeValueStore,                // runtimeValueStore
-		interpretationTimeValueStore,     // interpretationTimeValueStore
-		processBuiltins,                  // processBuiltins
-		serviceNetwork,                   // serviceNetwork
-	)
-	if err != nil {
-		return nil, err
-	}
-
-	testSuiteScript, mainFunctionName, inputArgs := kurtosis.WrapTestFunction(testFunction)
-
-	_, _, interpretationErr := interpreter.Interpret(
-		context.Background(), // context
-		testFunction.TestFile.Project.KurotosisYml.PackageName, // packageId
-		mainFunctionName, // mainFunctionName
-		testFunction.TestFile.Project.KurotosisYml.PackageReplaceOptions, // packageReplaceOptions
-		startosis_constants.PlaceHolderMainFileForPlaceStandAloneScript,  // relativePathtoMainFile
-		testSuiteScript,                          // serializedStarlark
-		inputArgs,                                // serializedJsonParams
-		false,                                    // nonBlockingMode
-		enclave_structure.NewEnclaveComponents(), // enclaveComponents
-		resolver.NewInstructionsPlanMask(0),      // instructionsPlanMask
-		image_download_mode.ImageDownloadMode_Missing, // imageDownloadMode
-	)
-
-	// FIXME The reporter should be doing all the lifting when it comes to logging and formatting
-	// the test output, at the moment it's kinda ready for that but not utitlized at all
-
-	testFunctionSummary := reporter.Summary()
-
-	if interpretationErr != nil {
-		logrus.Errorf("\tFAIL %s:\n================================================\n%v\n================================================", testFunction, testFunctionSummary.Errors())
-	} else {
-		if testFunctionSummary.Success() {
-			logrus.Infof("\tSUCCESS %s", testFunction)
-		} else {
-			logrus.Errorf("\tFAIL %s:\n================================================\n%v\n================================================", testFunction, testFunctionSummary.Errors())
-		}
-	}
-
-	return testFunctionSummary, nil
 }
 
 // Concatenates all logrus log level strings into a string array
