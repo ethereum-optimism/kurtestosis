@@ -24,4 +24,7 @@ kurtestosis = module(
     test = test,
     # get_service_config is defined as a global builtin included when this file is processed
     get_service_config = get_service_config,
+    debug = debug,
+    what = what,
+    mock = mock,
 )

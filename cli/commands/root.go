@@ -206,7 +206,7 @@ func runTestFunction(testFunction *core.TestFunction) (*core.TestFunctionSummary
 	}
 
 	// We load all the kurtestosis-specific predeclared starlark builtins
-	predeclared, err := kurtosis.LoadKurtestosisPredeclared(interpretationTimeValueStore)
+	predeclared, err := kurtosis.LoadKurtestosisPredeclared(interpretationTimeValueStore, runtimeValueStore)
 	if err != nil {
 		return nil, err
 	}

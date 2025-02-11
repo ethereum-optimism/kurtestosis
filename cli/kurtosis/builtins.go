@@ -6,11 +6,15 @@ import (
 
 	"github.com/kurtosis-tech/kurtosis/core/server/api_container/server/startosis_engine"
 	"github.com/kurtosis-tech/kurtosis/core/server/api_container/server/startosis_engine/interpretation_time_value_store"
+	"github.com/kurtosis-tech/kurtosis/core/server/api_container/server/startosis_engine/runtime_value_store"
 	"go.starlark.net/starlark"
 	"go.starlark.net/starlarktest"
 )
 
-func LoadKurtestosisPredeclared(interpretationTimeValueStore *interpretation_time_value_store.InterpretationTimeValueStore) (starlark.StringDict, error) {
+func LoadKurtestosisPredeclared(
+	interpretationTimeValueStore *interpretation_time_value_store.InterpretationTimeValueStore,
+	runtimeValueStore *runtime_value_store.RuntimeValueStore,
+) (starlark.StringDict, error) {
 	var err error
 
 	assertPredeclared, err := starlarktest.LoadAssertModule()
@@ -23,7 +27,7 @@ func LoadKurtestosisPredeclared(interpretationTimeValueStore *interpretation_tim
 		"expect": assertPredeclared["assert"],
 	}
 
-	kurtestosisPredeclared, err := modules.LoadKurtestosisModule(interpretationTimeValueStore)
+	kurtestosisPredeclared, err := modules.LoadKurtestosisModule(interpretationTimeValueStore, runtimeValueStore)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load assert kurtestosis: %v", err)
 	}

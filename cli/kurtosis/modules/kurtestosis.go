@@ -5,6 +5,7 @@ import (
 	"kurtestosis/cli/kurtosis/modules/builtins"
 
 	"github.com/kurtosis-tech/kurtosis/core/server/api_container/server/startosis_engine/interpretation_time_value_store"
+	"github.com/kurtosis-tech/kurtosis/core/server/api_container/server/startosis_engine/runtime_value_store"
 	"go.starlark.net/starlark"
 	"go.starlark.net/starlarkstruct"
 )
@@ -20,12 +21,15 @@ var (
 type KurtestosisHook func(thread *starlark.Thread, builtin *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) error
 
 // LoadKurtestosisModule loads the kurtestosis module.
-func LoadKurtestosisModule(interpretationTimeValueStore *interpretation_time_value_store.InterpretationTimeValueStore) (starlark.StringDict, error) {
+func LoadKurtestosisModule(interpretationTimeValueStore *interpretation_time_value_store.InterpretationTimeValueStore, runtimeValueStore *runtime_value_store.RuntimeValueStore) (starlark.StringDict, error) {
 	predeclared := starlark.StringDict{
 		"module":                             starlark.NewBuiltin("module", starlarkstruct.MakeModule),
 		"__before_test__":                    starlark.NewBuiltin("__before_test__", runBeforeTest),
 		"__after_test__":                     starlark.NewBuiltin("__after_test__", runAfterTest),
 		builtins.GetServiceConfigBuiltinName: starlark.NewBuiltin(builtins.GetServiceConfigBuiltinName, builtins.NewGetServiceConfig(interpretationTimeValueStore).CreateBuiltin()),
+		builtins.DebugBuiltinName:            starlark.NewBuiltin(builtins.DebugBuiltinName, builtins.NewDebug().CreateBuiltin()),
+		builtins.WhatBuiltinName:             starlark.NewBuiltin(builtins.WhatBuiltinName, builtins.NewWhat(runtimeValueStore).CreateBuiltin()),
+		builtins.MockBuiltinName:             starlark.NewBuiltin(builtins.MockBuiltinName, builtins.NewMock(runtimeValueStore).CreateBuiltin()),
 	}
 	thread := new(starlark.Thread)
 
