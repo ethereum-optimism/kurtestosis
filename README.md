@@ -1,5 +1,7 @@
 # kurtestosis
 
+> **This tool has been moved to [`kurtosis-test`](https://github.com/ethereum-optimism/kurtosis-test) and all the development work will move there**. Please update youre references
+
 Test runner for `kurtosis`
 
 ```python
